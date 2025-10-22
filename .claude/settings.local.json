@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(copy .env.example .env)",
+      "Bash(python main.py:*)",
+      "Bash(curl:*)",
+      "Bash(python test_image.py:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(uvicorn main:app:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(npm run dev)",
+      "Bash(pip install:*)",
+      "Bash(pip show:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
