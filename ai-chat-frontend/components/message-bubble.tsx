@@ -76,6 +76,33 @@ function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
 
+          {message.visualization && (
+            <div className="mb-3 relative group/viz">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-purple-500/20 to-pink-500/20 rounded-lg blur-md group-hover/viz:blur-lg transition-all duration-300"></div>
+              <div className={`relative rounded-lg overflow-hidden border-2 shadow-xl ring-2 ring-offset-2 ring-offset-background ${
+                isUser
+                  ? "border-white/30 ring-white/20"
+                  : "border-blue-500/30 ring-blue-500/30"
+              }`}>
+                <div className={`flex items-center gap-2 px-3 py-2 font-semibold text-sm border-b ${
+                  isUser
+                    ? "bg-white/10 border-white/20 text-white"
+                    : "bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400"
+                }`}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  Data Visualization
+                </div>
+                <img
+                  src={message.visualization}
+                  alt="Data Visualization"
+                  className="w-full h-auto object-contain bg-white dark:bg-gray-900 transform group-hover/viz:scale-[1.02] transition-transform duration-500"
+                />
+              </div>
+            </div>
+          )}
+
           <div className={`prose prose-sm max-w-none dark:prose-invert ${!isUser && 'bg-gradient-to-br from-transparent via-primary/5 to-accent/5 rounded-lg p-0.5'}`}>
             {message.isStreaming && !message.content ? (
               // Typing indicator when streaming starts
@@ -147,10 +174,11 @@ function MessageBubble({ message }: MessageBubbleProps) {
 
 // Memoize to prevent re-renders when message hasn't changed
 export default React.memo(MessageBubble, (prevProps, nextProps) => {
-  // Only re-render if message content, streaming status, or timestamp changed
+  // Only re-render if message content, streaming status, visualization, or timestamp changed
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
-    prevProps.message.isStreaming === nextProps.message.isStreaming
+    prevProps.message.isStreaming === nextProps.message.isStreaming &&
+    prevProps.message.visualization === nextProps.message.visualization
   )
 })

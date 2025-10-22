@@ -61,10 +61,17 @@ async def send_message(
 
         # Handle CSV if provided
         csv_analysis = None
+        visualization_image = None
         if csv_url:
             try:
-                df = await CSVService.load_csv_from_url(csv_url)
-                csv_analysis = CSVService.analyze_query(df, content)
+                csv_service = CSVService()
+                df = await csv_service.load_csv_from_url(csv_url)
+                csv_analysis = await csv_service.analyze_query(df, content, conversation_id=conversation_id)
+                await csv_service.close_session()
+
+                # Check if visualization was generated
+                if csv_analysis.get("type") == "visualization" and csv_analysis.get("result", {}).get("image_data"):
+                    visualization_image = csv_analysis["result"]["image_data"]
 
                 user_content.append(MessageContent(
                     type=MessageType.CSV,
@@ -100,6 +107,13 @@ async def send_message(
             text=ai_response_text
         )]
 
+        # Add visualization image to assistant message if generated
+        if visualization_image:
+            assistant_content.append(MessageContent(
+                type=MessageType.IMAGE,
+                image_url=visualization_image
+            ))
+
         assistant_message = await ChatService.add_message(
             conversation_id=conversation_id,
             role=MessageRole.ASSISTANT,
@@ -121,7 +135,8 @@ async def send_message(
                 content=assistant_message["content"],
                 timestamp=assistant_message["timestamp"]
             ),
-            "csv_analysis": csv_analysis
+            "csv_analysis": csv_analysis,
+            "visualization": visualization_image
         }
 
     except HTTPException:
@@ -159,11 +174,16 @@ async def upload_csv_file(
         # Read file
         contents = await file.read()
 
-        # Parse CSV
+        # Parse CSV and analyze
         df = CSVService.load_csv_from_bytes(contents)
+        csv_service = CSVService()
+        analysis = await csv_service.analyze_query(df, query, conversation_id=conversation_id)
+        await csv_service.close_session()
 
-        # Analyze based on query
-        analysis = CSVService.analyze_query(df, query)
+        # Check if visualization was generated
+        visualization_image = None
+        if analysis.get("type") == "visualization" and analysis.get("result", {}).get("image_data"):
+            visualization_image = analysis["result"]["image_data"]
 
         # Save user message with CSV data
         user_content = [
@@ -197,6 +217,13 @@ async def upload_csv_file(
             text=ai_response_text
         )]
 
+        # Add visualization image to assistant message if generated
+        if visualization_image:
+            assistant_content.append(MessageContent(
+                type=MessageType.IMAGE,
+                image_url=visualization_image
+            ))
+
         assistant_message = await ChatService.add_message(
             conversation_id=conversation_id,
             role=MessageRole.ASSISTANT,
@@ -218,7 +245,8 @@ async def upload_csv_file(
                 role=assistant_message["role"],
                 content=assistant_message["content"],
                 timestamp=assistant_message["timestamp"]
-            )
+            ),
+            "visualization": visualization_image
         }
 
     except HTTPException:
@@ -246,11 +274,11 @@ async def analyze_csv(
                 detail="Conversation not found"
             )
 
-        # Load CSV from URL
-        df = await CSVService.load_csv_from_url(csv_url)
-
-        # Analyze
-        analysis = CSVService.analyze_query(df, query)
+        # Load CSV from URL and analyze
+        csv_service = CSVService()
+        df = await csv_service.load_csv_from_url(csv_url)
+        analysis = await csv_service.analyze_query(df, query, conversation_id=conversation_id)
+        await csv_service.close_session()
 
         return {
             "success": True,

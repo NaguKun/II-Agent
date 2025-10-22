@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
+from services.visualization_service import VisualizationService
 
 # Try to import PandasAI, but make it optional
 try:
@@ -290,14 +291,14 @@ class CSVService:
             
         return response
 
-    def query_with_pandasai(self, df: pd.DataFrame, query: str, conversation_id: Optional[str] = None) -> Dict[str, Any]:
+    async def query_with_pandasai(self, df: pd.DataFrame, query: str, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """Execute a natural language query using PandasAI"""
         if not self.pandasai_available:
             return self._create_response(
-                "error", False, 
+                "error", False,
                 message="PandasAI not available. Please install pandasai and set OPENAI_API_KEY environment variable."
             )
-        
+
         try:
             smart_df = self.create_smart_dataframe(df, conversation_id)
             if smart_df is None:
@@ -305,13 +306,13 @@ class CSVService:
                     "error", False,
                     message="Failed to create SmartDataframe"
                 )
-            
-            # Execute the query with timeout
-            result = asyncio.run(asyncio.wait_for(
+
+            # Execute the query with timeout in a thread pool
+            result = await asyncio.wait_for(
                 asyncio.to_thread(smart_df.chat, query),
                 timeout=self.timeout
-            ))
-            
+            )
+
             return self._create_response(
                 "pandasai_query", True,
                 result=str(result),
@@ -322,7 +323,7 @@ class CSVService:
                     "sampled": len(df) > self._max_dataframe_size
                 }
             )
-            
+
         except asyncio.TimeoutError:
             return self._create_response(
                 "error", False,
@@ -335,16 +336,16 @@ class CSVService:
                 message=f"PandasAI query failed: {str(e)}"
             )
 
-    def get_pandasai_insights(self, df: pd.DataFrame, conversation_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_pandasai_insights(self, df: pd.DataFrame, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """Get AI-powered insights about the dataset"""
         if not self.pandasai_available:
             return self._create_response(
                 "error", False,
                 message="PandasAI not available. Please install pandasai and set OPENAI_API_KEY environment variable."
             )
-        
+
         insights = []
-        
+
         # Generate various insights
         insight_queries = [
             "What are the main patterns or trends in this dataset?",
@@ -353,20 +354,20 @@ class CSVService:
             "What insights can you provide about the data distribution?",
             "Are there any data quality issues I should be aware of?"
         ]
-        
+
         smart_df = self.create_smart_dataframe(df, conversation_id)
         if not smart_df:
             return self._create_response(
                 "error", False,
                 message="Failed to create SmartDataframe for insights"
             )
-        
+
         for query in insight_queries:
             try:
-                result = asyncio.run(asyncio.wait_for(
+                result = await asyncio.wait_for(
                     asyncio.to_thread(smart_df.chat, query),
                     timeout=self.timeout
-                ))
+                )
                 insights.append({
                     "question": query,
                     "answer": str(result)
@@ -381,7 +382,7 @@ class CSVService:
                     "question": query,
                     "answer": f"Error: {str(e)}"
                 })
-        
+
         return self._create_response(
             "pandasai_insights", True,
             result={"insights": insights},
@@ -393,23 +394,43 @@ class CSVService:
             }
         )
 
-    def analyze_query(self, df: pd.DataFrame, query: str, use_pandasai: bool = True, 
+    async def analyze_query(self, df: pd.DataFrame, query: str, use_pandasai: bool = True,
                      conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Analyze a natural language query and return appropriate results
         Uses PandasAI when available and appropriate, falls back to rule-based approach
         """
+        # Check if query is asking for visualization
+        query_lower = query.lower()
+        visualization_keywords = [
+            'plot', 'chart', 'graph', 'visualize', 'visualization', 'visual',
+            'histogram', 'bar chart', 'scatter', 'heatmap', 'box plot',
+            'line chart', 'show me', 'draw', 'display'
+        ]
+
+        wants_visualization = any(keyword in query_lower for keyword in visualization_keywords)
+
+        # If visualization is requested, generate it
+        if wants_visualization:
+            viz_result = VisualizationService.auto_visualize(df, query)
+            if viz_result.get("success"):
+                return self._create_response(
+                    "visualization", True,
+                    result=viz_result,
+                    metadata={"method": "visualization", "query": query}
+                )
+            # If visualization failed, continue with normal analysis
+
         # Determine if we should use PandasAI based on intent detection
         should_use_pandasai = use_pandasai and self.pandasai_available and self._should_use_pandasai(query)
-        
+
         # Try PandasAI first if appropriate
         if should_use_pandasai:
-            pandasai_result = self.query_with_pandasai(df, query, conversation_id)
+            pandasai_result = await self.query_with_pandasai(df, query, conversation_id)
             if pandasai_result.get("success", False):
                 return pandasai_result
-        
+
         # Fall back to rule-based approach
-        query_lower = query.lower()
 
         # Summarize dataset
         if any(word in query_lower for word in ['summarize', 'summary', 'overview', 'describe']):
@@ -483,7 +504,7 @@ class CSVService:
             metadata={"method": "rule_based", "query": query}
         )
 
-    def get_comprehensive_analysis(self, df: pd.DataFrame, conversation_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_comprehensive_analysis(self, df: pd.DataFrame, conversation_id: Optional[str] = None) -> Dict[str, Any]:
         """Get comprehensive analysis including both traditional stats and AI insights"""
         analysis = {
             "basic_info": CSVService.get_basic_info(df),
@@ -491,15 +512,15 @@ class CSVService:
             "missing_values": CSVService.get_missing_values(df),
             "pandasai_available": self.pandasai_available
         }
-        
+
         # Add AI insights if available
         if self.pandasai_available:
-            insights_result = self.get_pandasai_insights(df, conversation_id)
+            insights_result = await self.get_pandasai_insights(df, conversation_id)
             if insights_result.get("success", False):
                 analysis["ai_insights"] = insights_result["result"]["insights"]
             else:
                 analysis["ai_insights_error"] = insights_result.get("message", "Unknown error")
-        
+
         return analysis
 
     def clear_cache(self, conversation_id: Optional[str] = None):

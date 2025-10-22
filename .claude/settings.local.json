@@ -15,7 +15,8 @@
       "Bash(taskkill:*)",
       "Bash(npm run dev)",
       "Bash(pip install:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(pip uninstall:*)"
     ],
     "deny": [],
     "ask": []

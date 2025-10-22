@@ -14,6 +14,7 @@ export interface Message {
   timestamp: Date
   image?: string
   csvData?: string
+  visualization?: string // For generated visualizations from CSV analysis
   isStreaming?: boolean
 }
 
@@ -124,6 +125,7 @@ export default function ChatWindow() {
           role: "assistant",
           content: response.response,
           timestamp: new Date(),
+          visualization: response.visualization, // Add visualization if present
         }
 
         setMessages((prev) => [...prev, assistantMessage])
