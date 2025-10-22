@@ -214,6 +214,51 @@ class CSVService:
             "data": preview
         }
 
+    @staticmethod
+    def generate_suggested_questions(df: pd.DataFrame) -> List[str]:
+        """Generate smart suggested questions based on CSV structure"""
+        questions = []
+
+        # Basic overview questions
+        questions.append("Summarize this dataset for me")
+        questions.append(f"Show me the first 10 rows of data")
+
+        # Get column information
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        categorical_cols = df.select_dtypes(exclude=['number']).columns.tolist()
+
+        # Questions based on numeric columns
+        if numeric_cols:
+            if len(numeric_cols) == 1:
+                questions.append(f"Show me statistics for {numeric_cols[0]}")
+                questions.append(f"Plot a histogram of {numeric_cols[0]}")
+            else:
+                questions.append(f"What is the correlation between {numeric_cols[0]} and {numeric_cols[1]}?")
+                questions.append(f"Create a scatter plot of {numeric_cols[0]} vs {numeric_cols[1]}")
+                questions.append(f"Show me the distribution of {numeric_cols[0]}")
+
+        # Questions based on categorical columns
+        if categorical_cols:
+            questions.append(f"What are the unique values in {categorical_cols[0]}?")
+            questions.append(f"Show me a bar chart of {categorical_cols[0]}")
+
+        # Check for missing values
+        if df.isnull().sum().sum() > 0:
+            questions.append("Which columns have missing values?")
+
+        # Time series detection
+        date_columns = df.select_dtypes(include=['datetime64']).columns.tolist()
+        if date_columns:
+            questions.append(f"Show me trends over time using {date_columns[0]}")
+
+        # Advanced analysis
+        if len(numeric_cols) > 2:
+            questions.append("Show me a correlation heatmap")
+            questions.append("What are the key patterns in this data?")
+
+        # Limit to 8 suggestions
+        return questions[:8]
+
     def _sample_dataframe_if_large(self, df: pd.DataFrame) -> pd.DataFrame:
         """Sample dataframe if it's too large for PandasAI processing"""
         if len(df) > self._max_dataframe_size:

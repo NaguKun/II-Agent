@@ -1,18 +1,41 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import type { Message } from "./chat-window"
 import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import ReactMarkdown from "react-markdown"
 import { format } from "date-fns"
-import { Bot, User } from "lucide-react"
+import { Bot, User, Copy, Check, RotateCcw } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 interface MessageBubbleProps {
   message: Message
+  onRegenerate?: () => void
 }
 
-function MessageBubble({ message }: MessageBubbleProps) {
+function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
   const isUser = message.role === "user"
+  const [copied, setCopied] = useState(false)
+  const { toast } = useToast()
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content)
+      setCopied(true)
+      toast({
+        description: "Message copied to clipboard",
+        duration: 2000,
+      })
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      toast({
+        description: "Failed to copy message",
+        variant: "destructive",
+        duration: 2000,
+      })
+    }
+  }
 
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-3 duration-500 zoom-in-95`}>
@@ -154,11 +177,43 @@ function MessageBubble({ message }: MessageBubbleProps) {
           </Card>
         </div>
 
-        <div className={`text-xs text-muted-foreground mt-1 ${isUser ? "text-right" : "text-left"}`}>
-          {message.timestamp instanceof Date && !isNaN(message.timestamp.getTime())
-            ? format(message.timestamp, "HH:mm")
-            : format(new Date(), "HH:mm")}
-          {message.isStreaming && <span className="ml-1 italic">• typing...</span>}
+        <div className={`flex items-center gap-2 mt-1 ${isUser ? "justify-end" : "justify-start"}`}>
+          <div className="text-xs text-muted-foreground">
+            {message.timestamp instanceof Date && !isNaN(message.timestamp.getTime())
+              ? format(message.timestamp, "HH:mm")
+              : format(new Date(), "HH:mm")}
+            {message.isStreaming && <span className="ml-1 italic">• typing...</span>}
+          </div>
+
+          {/* Action buttons for assistant messages */}
+          {!isUser && !message.isStreaming && message.content && (
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 hover:bg-muted"
+                onClick={handleCopy}
+                title="Copy message"
+              >
+                {copied ? (
+                  <Check className="h-3 w-3 text-green-500" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </Button>
+              {onRegenerate && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:bg-muted"
+                  onClick={onRegenerate}
+                  title="Regenerate response"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

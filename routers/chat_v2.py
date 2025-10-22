@@ -45,7 +45,7 @@ async def send_text_message(request: dict):
         )
 
         # Get conversation history
-        messages = await ChatService.get_messages(session_id)
+        messages = await ChatService.get_messages(session_id, apply_sliding_window=True)
         formatted_messages = AIService.format_conversation_history(messages)
 
         # Generate AI response
@@ -109,7 +109,7 @@ async def send_text_message_stream(request: dict):
         )
 
         # Get conversation history
-        messages = await ChatService.get_messages(session_id)
+        messages = await ChatService.get_messages(session_id, apply_sliding_window=True)
         formatted_messages = AIService.format_conversation_history(messages)
 
         async def generate_stream():
@@ -204,7 +204,7 @@ async def send_image_message(
         )
 
         # Get conversation history
-        messages = await ChatService.get_messages(session_id)
+        messages = await ChatService.get_messages(session_id, apply_sliding_window=True)
         formatted_messages = AIService.format_conversation_history(messages)
 
         # Generate AI response
@@ -237,6 +237,44 @@ async def send_image_message(
         )
 
 
+@router.post("/chat/csv/suggestions")
+async def get_csv_suggestions(
+    session_id: str = Form(...),
+    csv_file: UploadFile = File(...)
+):
+    """
+    Get suggested questions for a CSV file
+    """
+    try:
+        # Validate file type
+        if not csv_file.filename.endswith('.csv'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only CSV files are allowed"
+            )
+
+        # Read and parse CSV
+        csv_bytes = await csv_file.read()
+        df = CSVService.load_csv_from_bytes(csv_bytes)
+
+        # Generate suggested questions
+        suggestions = CSVService.generate_suggested_questions(df)
+
+        # Get basic info for context
+        basic_info = CSVService.get_basic_info(df)
+
+        return {
+            "suggestions": suggestions,
+            "dataset_info": basic_info
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate suggestions: {str(e)}"
+        )
+
+
 @router.post("/chat/csv/upload")
 async def send_csv_message(
     session_id: str = Form(...),
@@ -266,6 +304,9 @@ async def send_csv_message(
         csv_bytes = await csv_file.read()
         df = CSVService.load_csv_from_bytes(csv_bytes)
 
+        # Generate suggested questions for frontend
+        suggested_questions = CSVService.generate_suggested_questions(df)
+
         # Analyze CSV
         csv_service = CSVService()
         csv_analysis = await csv_service.analyze_query(df, message, conversation_id=session_id)
@@ -288,7 +329,7 @@ async def send_csv_message(
         )
 
         # Get conversation history
-        messages = await ChatService.get_messages(session_id)
+        messages = await ChatService.get_messages(session_id, apply_sliding_window=True)
         formatted_messages = AIService.format_conversation_history(messages)
 
         # Generate AI response
@@ -318,7 +359,8 @@ async def send_csv_message(
             "response": ai_response_text,
             "csv_id": user_message["id"],
             "summary": csv_analysis,
-            "visualization": visualization_image
+            "visualization": visualization_image,
+            "suggested_questions": suggested_questions
         }
 
     except HTTPException:

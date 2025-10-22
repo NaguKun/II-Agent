@@ -3,6 +3,10 @@ from datetime import datetime
 from bson import ObjectId
 from database import MongoDB
 from models import Message, Conversation, MessageRole, MessageType, MessageContent
+from services.context_window import ContextWindowService
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -108,8 +112,22 @@ class ChatService:
         return message
 
     @staticmethod
-    async def get_messages(conversation_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get all messages for a conversation"""
+    async def get_messages(
+        conversation_id: str,
+        limit: int = 100,
+        apply_sliding_window: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all messages for a conversation
+
+        Args:
+            conversation_id: The conversation ID
+            limit: Maximum messages to retrieve from DB
+            apply_sliding_window: If True, apply sliding window optimization
+
+        Returns:
+            List of messages (potentially filtered by sliding window)
+        """
         collection = MongoDB.get_collection("messages")
 
         cursor = collection.find({"conversation_id": conversation_id}).sort("timestamp", 1).limit(limit)
@@ -119,7 +137,43 @@ class ChatService:
             msg["id"] = str(msg["_id"])
             messages.append(msg)
 
+        # Apply sliding window if requested
+        if apply_sliding_window:
+            result = ContextWindowService.apply_sliding_window(messages)
+            logger.info(
+                f"Sliding window: {result['kept_messages']}/{result['total_messages']} messages, "
+                f"~{result['estimated_tokens']} tokens"
+            )
+            return result["messages"]
+
         return messages
+
+    @staticmethod
+    async def get_optimized_context(
+        conversation_id: str,
+        max_messages: Optional[int] = None,
+        preserve_first: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Get optimized conversation context with sliding window applied
+
+        Returns messages + metadata about optimization
+        """
+        messages = await ChatService.get_messages(conversation_id, limit=200)
+
+        result = ContextWindowService.apply_sliding_window(
+            messages,
+            max_messages=max_messages,
+            preserve_first=preserve_first
+        )
+
+        return result
+
+    @staticmethod
+    async def get_context_summary(conversation_id: str) -> Dict[str, Any]:
+        """Get summary of context window status for a conversation"""
+        messages = await ChatService.get_messages(conversation_id)
+        return ContextWindowService.get_context_summary(messages)
 
     @staticmethod
     async def update_conversation_title(conversation_id: str, title: str) -> bool:
@@ -134,3 +188,78 @@ class ChatService:
             return result.modified_count > 0
         except Exception:
             return False
+
+    @staticmethod
+    async def export_conversation(conversation_id: str, format: str = "json") -> Dict[str, Any]:
+        """
+        Export conversation in different formats
+        Supports: json, markdown, text
+        """
+        conversation = await ChatService.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError("Conversation not found")
+
+        messages = await ChatService.get_messages(conversation_id)
+
+        if format == "json":
+            return {
+                "conversation": conversation,
+                "messages": messages
+            }
+        elif format == "markdown":
+            md_lines = [
+                f"# {conversation.get('title', 'Conversation')}",
+                f"\n**Created:** {conversation.get('created_at').strftime('%Y-%m-%d %H:%M:%S')}",
+                f"\n**Messages:** {len(messages)}\n",
+                "---\n"
+            ]
+
+            for msg in messages:
+                role = msg.get('role', 'user').capitalize()
+                content_list = msg.get('content', [])
+                timestamp = msg.get('timestamp').strftime('%H:%M:%S')
+
+                md_lines.append(f"### {role} ({timestamp})\n")
+
+                for content_item in content_list:
+                    if content_item.get('type') == 'text' and content_item.get('text'):
+                        md_lines.append(f"{content_item['text']}\n")
+                    elif content_item.get('type') == 'image':
+                        md_lines.append(f"*[Image attached]*\n")
+                    elif content_item.get('type') == 'csv':
+                        md_lines.append(f"*[CSV data attached]*\n")
+
+                md_lines.append("\n")
+
+            return {"content": "\n".join(md_lines)}
+
+        elif format == "text":
+            text_lines = [
+                f"Conversation: {conversation.get('title', 'Untitled')}",
+                f"Created: {conversation.get('created_at').strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Messages: {len(messages)}",
+                "=" * 50,
+                ""
+            ]
+
+            for msg in messages:
+                role = msg.get('role', 'user').upper()
+                content_list = msg.get('content', [])
+                timestamp = msg.get('timestamp').strftime('%H:%M:%S')
+
+                text_lines.append(f"[{timestamp}] {role}:")
+
+                for content_item in content_list:
+                    if content_item.get('type') == 'text' and content_item.get('text'):
+                        text_lines.append(f"  {content_item['text']}")
+                    elif content_item.get('type') == 'image':
+                        text_lines.append(f"  [Image attached]")
+                    elif content_item.get('type') == 'csv':
+                        text_lines.append(f"  [CSV data attached]")
+
+                text_lines.append("")
+
+            return {"content": "\n".join(text_lines)}
+
+        else:
+            raise ValueError(f"Unsupported format: {format}")

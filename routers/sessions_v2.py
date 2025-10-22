@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Query
+from fastapi.responses import PlainTextResponse, JSONResponse
 from typing import Optional, List
 from models import ConversationResponse
 from services.chat_service import ChatService
@@ -99,7 +100,7 @@ async def delete_session(session_id: str):
 @router.get("/{session_id}/stats")
 async def get_session_stats(session_id: str):
     """
-    Get context statistics for a session
+    Get context statistics for a session with sliding window info
     """
     try:
         conversation = await ChatService.get_conversation(session_id)
@@ -110,27 +111,27 @@ async def get_session_stats(session_id: str):
                 detail="Session not found"
             )
 
-        messages = await ChatService.get_messages(session_id)
+        # Get context summary with sliding window info
+        context_summary = await ChatService.get_context_summary(session_id)
 
+        messages = await ChatService.get_messages(session_id)
         user_messages = sum(1 for msg in messages if msg["role"] == "user")
         assistant_messages = sum(1 for msg in messages if msg["role"] == "assistant")
 
-        # Simple token estimation (rough)
-        total_tokens = sum(
-            len(msg["content"][0].get("text", "").split()) * 1.3
-            for msg in messages if msg["content"]
-        )
-
         return {
-            "total_messages": len(messages),
-            "total_tokens": int(total_tokens),
-            "max_messages": 100,
-            "max_tokens": 128000,
-            "needs_optimization": total_tokens > 100000,
+            "total_messages": context_summary["total_messages"],
+            "total_tokens": context_summary["estimated_tokens"],
+            "max_messages": context_summary.get("max_messages", 20),
+            "max_tokens": context_summary.get("token_limit", 100000),
+            "needs_optimization": context_summary["needs_optimization"],
+            "within_limits": context_summary["within_limits"],
+            "token_usage_percent": round(context_summary.get("token_usage_percent", 0), 2),
+            "message_usage_percent": round(context_summary.get("message_usage_percent", 0), 2),
             "user_messages": user_messages,
             "assistant_messages": assistant_messages,
             "system_messages": 0,
-            "messages_in_db": len(messages)
+            "messages_in_db": len(messages),
+            "sliding_window_enabled": True
         }
     except HTTPException:
         raise
@@ -144,11 +145,11 @@ async def get_session_stats(session_id: str):
 @router.get("/{session_id}/context")
 async def get_optimized_context(
     session_id: str,
-    strategy: str = Query("smart", regex="^(smart|sliding_window|token_aware)$"),
-    max_messages: Optional[int] = Query(None)
+    max_messages: Optional[int] = Query(None),
+    preserve_first: Optional[int] = Query(None)
 ):
     """
-    Get optimized context for a session
+    Get optimized context for a session with sliding window applied
     """
     try:
         conversation = await ChatService.get_conversation(session_id)
@@ -159,12 +160,22 @@ async def get_optimized_context(
                 detail="Session not found"
             )
 
-        messages = await ChatService.get_messages(session_id, limit=max_messages or 100)
+        # Get optimized context with sliding window
+        result = await ChatService.get_optimized_context(
+            session_id,
+            max_messages=max_messages,
+            preserve_first=preserve_first
+        )
 
         return {
             "session_id": session_id,
-            "strategy": strategy,
-            "message_count": len(messages),
+            "strategy": "sliding_window",
+            "total_messages": result["total_messages"],
+            "kept_messages": result["kept_messages"],
+            "removed_messages": result["removed_messages"],
+            "estimated_tokens": result["estimated_tokens"],
+            "window_applied": result["window_applied"],
+            "preserved_count": result.get("preserved_count", 0),
             "messages": [
                 {
                     "role": msg["role"],
@@ -172,7 +183,7 @@ async def get_optimized_context(
                     "timestamp": msg["timestamp"].isoformat(),
                     "metadata": {}
                 }
-                for msg in messages
+                for msg in result["messages"]
             ]
         }
     except HTTPException:
@@ -181,4 +192,53 @@ async def get_optimized_context(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get context: {str(e)}"
+        )
+
+
+@router.get("/{session_id}/export")
+async def export_conversation(
+    session_id: str,
+    format: str = Query("json", regex="^(json|markdown|text)$")
+):
+    """
+    Export conversation in different formats
+    Supported formats: json, markdown, text
+    """
+    try:
+        conversation = await ChatService.get_conversation(session_id)
+
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+
+        export_data = await ChatService.export_conversation(session_id, format)
+
+        # Return appropriate response based on format
+        if format == "json":
+            return JSONResponse(content=export_data)
+        elif format == "markdown":
+            return PlainTextResponse(
+                content=export_data["content"],
+                media_type="text/markdown",
+                headers={
+                    "Content-Disposition": f"attachment; filename=conversation_{session_id}.md"
+                }
+            )
+        elif format == "text":
+            return PlainTextResponse(
+                content=export_data["content"],
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f"attachment; filename=conversation_{session_id}.txt"
+                }
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export conversation: {str(e)}"
         )

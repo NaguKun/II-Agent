@@ -2,22 +2,57 @@ from typing import List, Dict, Any, Optional
 from config import settings
 import json
 import base64
+import hashlib
+import logging
+from functools import lru_cache
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
+
+# Simple in-memory cache for responses (use Redis in production)
+_response_cache: Dict[str, str] = {}
+MAX_CACHE_SIZE = 1000
 
 
 class AIService:
-    """Service for OpenAI GPT interactions"""
+    """Service for OpenAI GPT interactions with caching"""
 
-    client = None
+    _client: Optional[OpenAI] = None
+    _client_lock = None
 
     @classmethod
-    def get_client(cls):
-        """Get or create OpenAI client"""
-        if cls.client is None:
+    def get_client(cls) -> OpenAI:
+        """Get or create OpenAI client (singleton pattern)"""
+        if cls._client is None:
             if not settings.openai_api_key:
                 raise ValueError("OPENAI_API_KEY not set in environment")
-            cls.client = OpenAI(api_key=settings.openai_api_key)
-        return cls.client
+            cls._client = OpenAI(
+                api_key=settings.openai_api_key,
+                timeout=30.0,  # Request timeout
+                max_retries=2,  # Retry failed requests
+            )
+            logger.info("OpenAI client initialized")
+        return cls._client
+
+    @staticmethod
+    def _generate_cache_key(messages: List[Dict[str, Any]], system_prompt: Optional[str]) -> str:
+        """Generate a cache key for the request"""
+        # Create a hash of the messages and system prompt
+        content = json.dumps(messages, sort_keys=True) + (system_prompt or "")
+        return hashlib.md5(content.encode()).hexdigest()
+
+    @staticmethod
+    def _get_cached_response(cache_key: str) -> Optional[str]:
+        """Get cached response if available"""
+        return _response_cache.get(cache_key)
+
+    @staticmethod
+    def _cache_response(cache_key: str, response: str):
+        """Cache a response (with size limit)"""
+        if len(_response_cache) >= MAX_CACHE_SIZE:
+            # Simple LRU: remove first item
+            _response_cache.pop(next(iter(_response_cache)))
+        _response_cache[cache_key] = response
 
     @staticmethod
     def format_conversation_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -41,19 +76,23 @@ class AIService:
                     })
 
                 elif content_type == "image" and content_item.get("image_url"):
-                    # OpenAI expects image_url format
-                    image_data = content_item["image_url"]
+                    # IMPORTANT: OpenAI API only allows images in user messages, not assistant messages
+                    # Skip images in assistant messages to avoid API errors
+                    if role == "user":
+                        # OpenAI expects image_url format
+                        image_data = content_item["image_url"]
 
-                    # Ensure proper format
-                    if not image_data.startswith("data:image"):
-                        image_data = f"data:image/jpeg;base64,{image_data}"
+                        # Ensure proper format
+                        if not image_data.startswith("data:image"):
+                            image_data = f"data:image/jpeg;base64,{image_data}"
 
-                    message_content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": image_data
-                        }
-                    })
+                        message_content.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image_data
+                            }
+                        })
+                    # If it's an assistant message with an image, skip the image but keep processing other content
 
                 elif content_type == "csv" and content_item.get("csv_data"):
                     # Format CSV data as text context
@@ -220,10 +259,19 @@ class AIService:
     @staticmethod
     async def generate_response(
         messages: List[Dict[str, Any]],
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        use_cache: bool = True
     ) -> str:
-        """Generate AI response using OpenAI GPT-4o-mini"""
+        """Generate AI response using OpenAI GPT-4o-mini with caching"""
         try:
+            # Check cache first
+            if use_cache:
+                cache_key = AIService._generate_cache_key(messages, system_prompt)
+                cached_response = AIService._get_cached_response(cache_key)
+                if cached_response:
+                    logger.info(f"Cache hit for request")
+                    return cached_response
+
             client = AIService.get_client()
 
             # Prepare messages for OpenAI
@@ -247,9 +295,16 @@ class AIService:
                 temperature=0.7
             )
 
-            return response.choices[0].message.content
+            response_text = response.choices[0].message.content
+
+            # Cache the response
+            if use_cache and response_text:
+                AIService._cache_response(cache_key, response_text)
+
+            return response_text
 
         except Exception as e:
+            logger.error(f"OpenAI API error: {str(e)}")
             # Fallback response if API fails
             return f"I apologize, but I encountered an error: {str(e)}. Please check your API key and try again."
 
