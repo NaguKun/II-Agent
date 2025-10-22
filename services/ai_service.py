@@ -197,7 +197,7 @@ class AIService:
             parts.append(f"\nColumn: {result_data.get('name')}")
             parts.append(f"Data Type: {result_data.get('dtype')}")
             parts.append(f"Non-null Count: {result_data.get('non_null_count')}")
-            parts.append(f"Unique Values: {result_data.get('unique_values')}")
+            parts.append(f"Unique Values Count: {result_data.get('unique_values')}")
 
             if result_data.get('mean') is not None:
                 parts.append(f"\nNumeric Statistics:")
@@ -207,10 +207,15 @@ class AIService:
                 parts.append(f"  - Median: {result_data.get('median'):.2f}")
                 parts.append(f"  - Std Dev: {result_data.get('std'):.2f}")
 
-            if result_data.get('top_values'):
-                parts.append("\nTop Values:")
+            # Show all unique values if available
+            if result_data.get('all_unique_values'):
+                parts.append(f"\nAll Unique Values ({len(result_data['all_unique_values'])}):")
+                for value in result_data['all_unique_values']:
+                    parts.append(f"  - {value}")
+            elif result_data.get('top_values'):
+                parts.append("\nTop 10 Most Common Values:")
                 for value, count in result_data['top_values'].items():
-                    parts.append(f"  - {value}: {count}")
+                    parts.append(f"  - {value}: {count} occurrences")
 
         elif response_type == "basic_info":
             # Basic info response

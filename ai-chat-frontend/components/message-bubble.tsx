@@ -75,26 +75,90 @@ function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
 
           {message.csvData && (
             <div className="mb-3 relative group/csv">
-              <div className="absolute inset-0 bg-gradient-to-br from-secondary/20 via-accent/20 to-primary/20 rounded-lg blur-md group-hover/csv:blur-lg transition-all duration-300"></div>
-              <div className={`relative p-3 rounded-lg border-2 text-xs font-mono overflow-x-auto max-h-32 backdrop-blur-sm shadow-lg ring-2 ring-offset-2 ring-offset-background ${
+              <div className="absolute inset-0 bg-gradient-to-br from-green-500/20 via-green-400/20 to-green-600/20 rounded-xl blur-md group-hover/csv:blur-lg transition-all duration-300"></div>
+              <div className={`relative rounded-xl border-2 backdrop-blur-sm shadow-xl ring-2 ring-offset-2 ring-offset-background overflow-hidden ${
                 isUser
-                  ? "bg-white/20 border-white/30 ring-white/20"
-                  : "bg-muted/50 border-secondary/40 ring-secondary/30"
+                  ? "bg-white/10 border-white/30 ring-white/20"
+                  : "bg-gradient-to-br from-green-50/80 to-green-100/80 dark:from-green-950/50 dark:to-green-900/50 border-green-200/50 dark:border-green-800/50 ring-green-300/30 dark:ring-green-700/30"
               }`}>
-                <div className={`flex items-center gap-2 mb-2 font-bold ${
-                  isUser ? "text-white" : "text-secondary-foreground"
+                {/* Header */}
+                <div className={`flex items-center gap-2 px-4 py-2.5 font-semibold text-sm border-b ${
+                  isUser
+                    ? "bg-white/10 border-white/20 text-white"
+                    : "bg-gradient-to-r from-green-100/80 to-green-200/80 dark:from-green-900/40 dark:to-green-800/40 border-green-200/50 dark:border-green-800/50 text-green-700 dark:text-green-300"
                 }`}>
-                  <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  CSV Data
+                  <span>CSV Data File</span>
+                  <div className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
+                    isUser
+                      ? "bg-white/20 text-white/90"
+                      : "bg-green-200/50 dark:bg-green-800/50 text-green-800 dark:text-green-200"
+                  }`}>
+                    {message.csvData.split("\n")[0].split(",").length} columns
+                  </div>
                 </div>
-                <pre className={`whitespace-pre-wrap break-words leading-relaxed ${
-                  isUser ? "text-white/90" : "text-gray-700 dark:text-gray-300"
-                }`}>
-                  {message.csvData.split("\n").slice(0, 5).join("\n")}
-                  {message.csvData.split("\n").length > 5 && "\n..."}
-                </pre>
+
+                {/* CSV Content - Display as table */}
+                <div className="p-4 overflow-x-auto max-h-64"> 
+                  <div className={`text-xs ${
+                    isUser ? "text-white/90" : "text-gray-700 dark:text-gray-300"
+                  }`}>
+                    {(() => {
+                      const lines = message.csvData.split("\n").filter(line => line.trim());
+                      const headers = lines[0]?.split(",") || [];
+                      const rows = lines.slice(1, 6); // Show first 5 data rows
+
+                      return (
+                        <div className="space-y-2">
+                          {/* Table */}
+                          <div className="border rounded-lg overflow-hidden border-green-200/50 dark:border-green-800/50">
+                            <table className="w-full text-left">
+                              <thead>
+                                <tr className={`${
+                                  isUser
+                                    ? "bg-white/10"
+                                    : "bg-gradient-to-r from-green-100/60 to-green-200/60 dark:from-green-900/30 dark:to-green-800/30"
+                                }`}>
+                                  {headers.map((header, idx) => (
+                                    <th key={idx} className="px-3 py-2 font-semibold border-r last:border-r-0 border-green-200/30 dark:border-green-800/30">
+                                      {header.trim()}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((row, rowIdx) => (
+                                  <tr key={rowIdx} className={`border-t transition-colors ${
+                                    isUser
+                                      ? "border-white/10 hover:bg-white/5"
+                                      : "border-green-200/30 dark:border-green-800/30 hover:bg-green-50/30 dark:hover:bg-green-900/20"
+                                  }`}>
+                                    {row.split(",").map((cell, cellIdx) => (
+                                      <td key={cellIdx} className="px-3 py-2 border-r last:border-r-0 border-green-200/20 dark:border-green-800/20">
+                                        {cell.trim()}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Show more indicator */}
+                          {lines.length > 6 && (
+                            <div className={`text-center text-xs italic ${
+                              isUser ? "text-white/70" : "text-green-600 dark:text-green-400"
+                            }`}>
+                              ... and {lines.length - 6} more rows
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
             </div>
           )}

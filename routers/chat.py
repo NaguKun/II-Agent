@@ -59,13 +59,35 @@ async def send_message(
                 image_url=image_data
             ))
 
-        # Handle CSV if provided
+        # Handle CSV if provided OR check if conversation has existing CSV data
         csv_analysis = None
         visualization_image = None
-        if csv_url:
+        active_csv_url = csv_url  # Track the active CSV URL
+        active_csv_data = None  # Track uploaded CSV data
+
+        # If no csv_url provided, check if conversation metadata has stored CSV
+        if not csv_url:
+            metadata = conversation.get("metadata", {})
+
+            # Check for CSV URL (for URL-based CSVs)
+            if metadata.get("active_csv_url"):
+                active_csv_url = metadata["active_csv_url"]
+
+            # Check for uploaded CSV data (base64 encoded)
+            elif metadata.get("active_csv_data"):
+                import base64
+                active_csv_data = base64.b64decode(metadata["active_csv_data"])
+
+        if active_csv_url or active_csv_data:
             try:
                 csv_service = CSVService()
-                df = await csv_service.load_csv_from_url(csv_url)
+
+                # Load dataframe from URL or data
+                if active_csv_url:
+                    df = await csv_service.load_csv_from_url(active_csv_url)
+                else:
+                    df = CSVService.load_csv_from_bytes(active_csv_data)
+
                 csv_analysis = await csv_service.analyze_query(df, content, conversation_id=conversation_id)
                 await csv_service.close_session()
 
@@ -75,9 +97,16 @@ async def send_message(
 
                 user_content.append(MessageContent(
                     type=MessageType.CSV,
-                    csv_url=csv_url,
+                    csv_url=active_csv_url,
                     csv_data=csv_analysis
                 ))
+
+                # Store CSV URL in conversation metadata for future use (only for new uploads)
+                if csv_url:  # Only update if this is a new CSV upload
+                    await ChatService.update_conversation_metadata(
+                        conversation_id=conversation_id,
+                        metadata={"active_csv_url": active_csv_url}
+                    )
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -177,8 +206,25 @@ async def upload_csv_file(
         # Parse CSV and analyze
         df = CSVService.load_csv_from_bytes(contents)
         csv_service = CSVService()
+
+        # Store the dataframe in the service for future queries in this conversation
+        # Note: For uploaded files, we need to cache the actual dataframe since there's no URL
         analysis = await csv_service.analyze_query(df, query, conversation_id=conversation_id)
         await csv_service.close_session()
+
+        # Store CSV data (as string) in conversation metadata for future use
+        # This allows multi-turn conversations to work with uploaded CSVs
+        import base64
+        csv_data_base64 = base64.b64encode(contents).decode('utf-8')
+
+        await ChatService.update_conversation_metadata(
+            conversation_id=conversation_id,
+            metadata={
+                "active_csv_filename": file.filename,
+                "active_csv_data": csv_data_base64,
+                "has_active_csv": True
+            }
+        )
 
         # Check if visualization was generated
         visualization_image = None

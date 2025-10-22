@@ -145,7 +145,7 @@ class CSVService:
         }
 
     @staticmethod
-    def get_column_info(df: pd.DataFrame, column_name: str) -> Dict[str, Any]:
+    def get_column_info(df: pd.DataFrame, column_name: str, return_all_unique: bool = False) -> Dict[str, Any]:
         """Get detailed information about a specific column"""
         if column_name not in df.columns:
             raise ValueError(f"Column '{column_name}' not found")
@@ -169,7 +169,12 @@ class CSVService:
                 "std": float(col.std()) if not pd.isna(col.std()) else None
             })
         else:
-            # For non-numeric columns, show top values
+            # For non-numeric columns, show top values or all unique values
+            if return_all_unique and col.nunique() <= 100:
+                # Return all unique values if requested and count is reasonable
+                all_unique = col.dropna().unique().tolist()
+                info["all_unique_values"] = [str(v) for v in all_unique]
+
             top_values = col.value_counts().head(10).to_dict()
             info["top_values"] = {str(k): int(v) for k, v in top_values.items()}
 
@@ -525,7 +530,17 @@ class CSVService:
                 metadata={"method": "rule_based", "query": query}
             )
 
-        # Column info
+        # Column info - check for unique values specifically
+        if any(word in query_lower for word in ['unique', 'distinct', 'different']):
+            for col in df.columns:
+                if col.lower() in query_lower:
+                    return self._create_response(
+                        "column_info", True,
+                        result=CSVService.get_column_info(df, col, return_all_unique=True),
+                        metadata={"method": "rule_based", "query": query, "column": col}
+                    )
+
+        # General column info
         for col in df.columns:
             if col.lower() in query_lower:
                 return self._create_response(

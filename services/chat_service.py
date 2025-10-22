@@ -190,6 +190,29 @@ class ChatService:
             return False
 
     @staticmethod
+    async def update_conversation_metadata(conversation_id: str, metadata: Dict[str, Any]) -> bool:
+        """Update conversation metadata (merge with existing)"""
+        collection = MongoDB.get_collection("conversations")
+
+        try:
+            # Get existing metadata
+            conversation = await collection.find_one({"_id": ObjectId(conversation_id)})
+            if not conversation:
+                return False
+
+            existing_metadata = conversation.get("metadata", {})
+            existing_metadata.update(metadata)
+
+            result = await collection.update_one(
+                {"_id": ObjectId(conversation_id)},
+                {"$set": {"metadata": existing_metadata, "updated_at": datetime.utcnow()}}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            logger.error(f"Error updating conversation metadata: {str(e)}")
+            return False
+
+    @staticmethod
     async def export_conversation(conversation_id: str, format: str = "json") -> Dict[str, Any]:
         """
         Export conversation in different formats

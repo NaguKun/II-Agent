@@ -81,6 +81,7 @@ async def send_text_message(request: dict):
 async def send_text_message_stream(request: dict):
     """
     Send a text message with streaming response
+    Supports CSV follow-up questions with visualizations
     """
     try:
         session_id = request.get("session_id")
@@ -100,8 +101,44 @@ async def send_text_message_stream(request: dict):
                 detail="Session not found"
             )
 
+        # Check if there's active CSV data in conversation metadata
+        csv_analysis = None
+        visualization_image = None
+        metadata = conversation.get("metadata", {})
+
+        if metadata.get("has_active_csv") or metadata.get("active_csv_url") or metadata.get("active_csv_data"):
+            try:
+                csv_service = CSVService()
+
+                # Load CSV from URL or data
+                if metadata.get("active_csv_url"):
+                    df = await csv_service.load_csv_from_url(metadata["active_csv_url"])
+                elif metadata.get("active_csv_data"):
+                    import base64
+                    csv_bytes = base64.b64decode(metadata["active_csv_data"])
+                    df = CSVService.load_csv_from_bytes(csv_bytes)
+                else:
+                    # Try to get CSV from cache using conversation_id
+                    df = None
+
+                if df is not None:
+                    csv_analysis = await csv_service.analyze_query(df, message, conversation_id=session_id)
+
+                    # Check if visualization was generated
+                    if csv_analysis.get("type") == "visualization" and csv_analysis.get("result", {}).get("image_data"):
+                        visualization_image = csv_analysis["result"]["image_data"]
+
+                await csv_service.close_session()
+            except Exception as csv_error:
+                print(f"CSV processing error: {str(csv_error)}")
+
         # Save user message
         user_content = [MessageContent(type=MessageType.TEXT, text=message)]
+
+        # Add CSV analysis to user content if available
+        if csv_analysis:
+            user_content.append(MessageContent(type=MessageType.CSV, csv_data=csv_analysis))
+
         user_message = await ChatService.add_message(
             conversation_id=session_id,
             role=MessageRole.USER,
@@ -128,14 +165,30 @@ async def send_text_message_stream(request: dict):
 
                 # Save assistant message after streaming
                 assistant_content = [MessageContent(type=MessageType.TEXT, text=full_response)]
+
+                # Add visualization image to assistant message if generated
+                if visualization_image:
+                    assistant_content.append(MessageContent(
+                        type=MessageType.IMAGE,
+                        image_url=visualization_image
+                    ))
+
                 assistant_message = await ChatService.add_message(
                     conversation_id=session_id,
                     role=MessageRole.ASSISTANT,
                     content=assistant_content
                 )
 
-                # Send completion message
-                yield f"data: {json.dumps({'done': True, 'message_id': assistant_message['id']})}\n\n"
+                # Send completion message with visualization if available
+                completion_data = {
+                    'done': True,
+                    'message_id': assistant_message['id']
+                }
+
+                if visualization_image:
+                    completion_data['visualization'] = visualization_image
+
+                yield f"data: {json.dumps(completion_data)}\n\n"
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -303,6 +356,17 @@ async def send_csv_message(
         # Read and parse CSV
         csv_bytes = await csv_file.read()
         df = CSVService.load_csv_from_bytes(csv_bytes)
+
+        # Store CSV data in conversation metadata for multi-turn support
+        csv_data_base64 = base64.b64encode(csv_bytes).decode('utf-8')
+        await ChatService.update_conversation_metadata(
+            conversation_id=session_id,
+            metadata={
+                "active_csv_filename": csv_file.filename,
+                "active_csv_data": csv_data_base64,
+                "has_active_csv": True
+            }
+        )
 
         # Generate suggested questions for frontend
         suggested_questions = CSVService.generate_suggested_questions(df)

@@ -194,11 +194,11 @@ export default function ChatWindow() {
             )
           },
           // On complete
-          (messageId: string) => {
+          (messageId: string, visualization?: string) => {
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === streamingMessageId
-                  ? { ...msg, id: messageId, isStreaming: false }
+                  ? { ...msg, id: messageId, isStreaming: false, visualization: visualization }
                   : msg
               )
             )
