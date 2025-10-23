@@ -5,10 +5,10 @@ import type React from "react"
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Send, Upload, X, Image, FileText, Video, Presentation, Globe, Code } from "lucide-react"
+import { Send, Upload, X, Image, FileText, Video, Presentation, Globe, Code, Link } from "lucide-react"
 
 interface ChatInputProps {
-  onSendMessage: (content: string, imageFile?: File, csvFile?: File) => void
+  onSendMessage: (content: string, imageFile?: File, csvFile?: File, csvUrl?: string) => void
   mode: "text" | "image" | "csv"
   disabled?: boolean
   selectedModel?: string
@@ -20,6 +20,8 @@ export default function ChatInput({ onSendMessage, mode, disabled, selectedModel
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [csvPreview, setCsvPreview] = useState<string | null>(null)
+  const [csvUrl, setCsvUrl] = useState<string>("")
+  const [showUrlInput, setShowUrlInput] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const csvInputRef = useRef<HTMLInputElement>(null)
   const generalFileInputRef = useRef<HTMLInputElement>(null)
@@ -33,12 +35,14 @@ export default function ChatInput({ onSendMessage, mode, disabled, selectedModel
 
   const handleSend = () => {
     if (!input.trim()) return
-    onSendMessage(input, imageFile || undefined, csvFile || undefined)
+    onSendMessage(input, imageFile || undefined, csvFile || undefined, csvUrl || undefined)
     setInput("")
     setImageFile(null)
     setImagePreview(null)
     setCsvFile(null)
     setCsvPreview(null)
+    setCsvUrl("")
+    setShowUrlInput(false)
   }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -163,6 +167,65 @@ export default function ChatInput({ onSendMessage, mode, disabled, selectedModel
           </div>
         )}
 
+        {/* CSV URL Input */}
+        {showUrlInput && !csvUrl && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 zoom-in-95">
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-cyan-500/20 to-teal-500/20 rounded-lg blur-xl transition-all duration-300"></div>
+              <div className="relative bg-muted/50 p-3 md:p-4 rounded-lg border-2 border-blue-500/30 shadow-xl backdrop-blur-sm ring-2 ring-blue-500/50 ring-offset-2 ring-offset-background">
+                <div className="flex items-center gap-2 mb-2 text-blue-600 dark:text-blue-400 font-bold">
+                  <Link className="h-4 w-4" />
+                  <span className="text-sm">Paste CSV URL</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://raw.githubusercontent.com/user/repo/main/data.csv"
+                    value={csvUrl}
+                    onChange={(e) => setCsvUrl(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-md border border-border bg-input text-foreground placeholder-muted-foreground text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-shadow"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowUrlInput(false)}
+                    className="hover:bg-destructive/10"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CSV URL Preview */}
+        {csvUrl && (
+          <div className="relative animate-in fade-in slide-in-from-bottom-4 duration-500 zoom-in-95">
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-cyan-500/20 to-teal-500/20 rounded-lg blur-xl group-hover:blur-2xl transition-all duration-300"></div>
+              <div className="relative bg-muted/50 p-3 md:p-4 rounded-lg border-2 border-blue-500/30 shadow-2xl backdrop-blur-sm ring-2 ring-blue-500/50 ring-offset-2 ring-offset-background">
+                <div className="flex items-center gap-2 mb-2 text-blue-600 dark:text-blue-400 font-bold">
+                  <Link className="h-4 w-4 animate-pulse" />
+                  <span className="text-sm">CSV URL</span>
+                </div>
+                <p className="text-xs font-mono text-foreground break-all">
+                  {csvUrl}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setCsvUrl("")
+                setShowUrlInput(false)
+              }}
+              className="absolute -top-3 -right-3 bg-gradient-to-br from-destructive to-destructive text-destructive-foreground rounded-full p-1.5 hover:scale-110 hover:rotate-90 transition-all duration-300 shadow-lg ring-2 ring-destructive/50 hover:ring-destructive/70"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {/* Main Input */}
         <div className="flex gap-1.5 md:gap-2 items-start">
           {/* File upload buttons on the left */}
@@ -182,18 +245,28 @@ export default function ChatInput({ onSendMessage, mode, disabled, selectedModel
                 </Button>
               </>
             )}
-            {mode === "csv" && !csvPreview && (
+            {mode === "csv" && !csvPreview && !csvUrl && (
               <>
                 <input ref={csvInputRef} type="file" accept=".csv" onChange={handleCsvUpload} className="hidden" />
                 <Button
                   size="icon"
                   variant="outline"
                   onClick={() => csvInputRef.current?.click()}
-                  title="Upload CSV"
+                  title="Upload CSV file"
                   disabled={disabled}
                   className="hover:bg-primary/10 transition-colors h-8 w-8 md:h-10 md:w-10"
                 >
                   <Upload className="h-3 w-3 md:h-4 md:w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={() => setShowUrlInput(!showUrlInput)}
+                  title="Paste CSV URL"
+                  disabled={disabled}
+                  className="hover:bg-primary/10 transition-colors h-8 w-8 md:h-10 md:w-10"
+                >
+                  <Link className="h-3 w-3 md:h-4 md:w-4" />
                 </Button>
               </>
             )}

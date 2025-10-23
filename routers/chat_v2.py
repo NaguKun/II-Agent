@@ -82,6 +82,7 @@ async def send_text_message_stream(request: dict):
     """
     Send a text message with streaming response
     Supports CSV follow-up questions with visualizations
+    Auto-detects CSV URLs in messages
     """
     try:
         session_id = request.get("session_id")
@@ -101,10 +102,45 @@ async def send_text_message_stream(request: dict):
                 detail="Session not found"
             )
 
+        # Detect CSV URL in message (support common raw CSV URLs)
+        import re
+        csv_url_pattern = r'https?://[^\s]+\.csv|https?://raw\.githubusercontent\.com/[^\s]+|https?://gist\.githubusercontent\.com/[^\s]+'
+        detected_csv_url = re.search(csv_url_pattern, message, re.IGNORECASE)
+
+        metadata = conversation.get("metadata", {})
+
+        # If CSV URL detected and no active CSV, load it
+        if detected_csv_url and not metadata.get("has_active_csv"):
+            csv_url = detected_csv_url.group(0)
+            try:
+                csv_service = CSVService()
+                df = await csv_service.load_csv_from_url(csv_url)
+                await csv_service.close_session()
+
+                # Store in metadata
+                csv_bytes = df.to_csv(index=False).encode('utf-8')
+                csv_data_base64 = base64.b64encode(csv_bytes).decode('utf-8')
+                csv_filename = csv_url.split('/')[-1] or "data.csv"
+
+                await ChatService.update_conversation_metadata(
+                    conversation_id=session_id,
+                    metadata={
+                        "active_csv_filename": csv_filename,
+                        "active_csv_data": csv_data_base64,
+                        "active_csv_url": csv_url,
+                        "has_active_csv": True
+                    }
+                )
+
+                # Reload conversation to get updated metadata
+                conversation = await ChatService.get_conversation(session_id)
+                metadata = conversation.get("metadata", {})
+            except Exception as e:
+                print(f"Failed to auto-load CSV from URL: {str(e)}")
+
         # Check if there's active CSV data in conversation metadata
         csv_analysis = None
         visualization_image = None
-        metadata = conversation.get("metadata", {})
 
         if metadata.get("has_active_csv") or metadata.get("active_csv_url") or metadata.get("active_csv_data"):
             try:
@@ -114,7 +150,6 @@ async def send_text_message_stream(request: dict):
                 if metadata.get("active_csv_url"):
                     df = await csv_service.load_csv_from_url(metadata["active_csv_url"])
                 elif metadata.get("active_csv_data"):
-                    import base64
                     csv_bytes = base64.b64decode(metadata["active_csv_data"])
                     df = CSVService.load_csv_from_bytes(csv_bytes)
                 else:
@@ -124,9 +159,16 @@ async def send_text_message_stream(request: dict):
                 if df is not None:
                     csv_analysis = await csv_service.analyze_query(df, message, conversation_id=session_id)
 
+                    # Debug logging
+                    print(f"[DEBUG] CSV Analysis Type: {csv_analysis.get('type')}")
+                    print(f"[DEBUG] CSV Analysis Keys: {csv_analysis.keys()}")
+
                     # Check if visualization was generated
                     if csv_analysis.get("type") == "visualization" and csv_analysis.get("result", {}).get("image_data"):
                         visualization_image = csv_analysis["result"]["image_data"]
+                        print(f"[DEBUG] Visualization image extracted! Length: {len(visualization_image)}")
+                    else:
+                        print(f"[DEBUG] No visualization found in csv_analysis")
 
                 await csv_service.close_session()
             except Exception as csv_error:
@@ -187,6 +229,9 @@ async def send_text_message_stream(request: dict):
 
                 if visualization_image:
                     completion_data['visualization'] = visualization_image
+                    print(f"[DEBUG] Sending visualization in completion! Length: {len(visualization_image)}")
+                else:
+                    print(f"[DEBUG] No visualization to send in completion")
 
                 yield f"data: {json.dumps(completion_data)}\n\n"
 
@@ -332,10 +377,11 @@ async def get_csv_suggestions(
 async def send_csv_message(
     session_id: str = Form(...),
     message: str = Form(...),
-    csv_file: UploadFile = File(...)
+    csv_file: Optional[UploadFile] = File(None),
+    csv_url: Optional[str] = Form(None)
 ):
     """
-    Send a message with a CSV file
+    Send a message with a CSV file or URL
     """
     try:
         # Verify conversation exists
@@ -346,26 +392,51 @@ async def send_csv_message(
                 detail="Session not found"
             )
 
-        # Validate file type
-        if not csv_file.filename.endswith('.csv'):
+        # Ensure either csv_file or csv_url is provided
+        if not csv_file and not csv_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only CSV files are allowed"
+                detail="Either csv_file or csv_url must be provided"
             )
 
-        # Read and parse CSV
-        csv_bytes = await csv_file.read()
-        df = CSVService.load_csv_from_bytes(csv_bytes)
+        # Load CSV from file or URL
+        if csv_url:
+            # Load CSV from URL
+            csv_service = CSVService()
+            df = await csv_service.load_csv_from_url(csv_url)
+            await csv_service.close_session()
+
+            # For URL, we'll store the URL itself for reference
+            csv_filename = csv_url.split('/')[-1] or "data.csv"
+            csv_bytes = df.to_csv(index=False).encode('utf-8')
+        else:
+            # Validate file type
+            if not csv_file.filename.endswith('.csv'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Only CSV files are allowed"
+                )
+
+            # Read and parse CSV from file
+            csv_bytes = await csv_file.read()
+            csv_filename = csv_file.filename
+            df = CSVService.load_csv_from_bytes(csv_bytes)
 
         # Store CSV data in conversation metadata for multi-turn support
         csv_data_base64 = base64.b64encode(csv_bytes).decode('utf-8')
+        metadata_update = {
+            "active_csv_filename": csv_filename,
+            "active_csv_data": csv_data_base64,
+            "has_active_csv": True
+        }
+
+        # Store URL if provided for easier reloading
+        if csv_url:
+            metadata_update["active_csv_url"] = csv_url
+
         await ChatService.update_conversation_metadata(
             conversation_id=session_id,
-            metadata={
-                "active_csv_filename": csv_file.filename,
-                "active_csv_data": csv_data_base64,
-                "has_active_csv": True
-            }
+            metadata=metadata_update
         )
 
         # Generate suggested questions for frontend
@@ -382,8 +453,9 @@ async def send_csv_message(
             visualization_image = csv_analysis["result"]["image_data"]
 
         # Save user message
+        csv_source = f"URL: {csv_url}" if csv_url else f"File: {csv_filename}"
         user_content = [
-            MessageContent(type=MessageType.TEXT, text=f"Uploaded CSV: {csv_file.filename}. {message}"),
+            MessageContent(type=MessageType.TEXT, text=f"Uploaded CSV ({csv_source}). {message}"),
             MessageContent(type=MessageType.CSV, csv_data=csv_analysis)
         ]
         user_message = await ChatService.add_message(

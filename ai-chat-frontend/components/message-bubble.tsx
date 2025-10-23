@@ -19,6 +19,11 @@ function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false)
   const { toast } = useToast()
 
+  // Debug log for visualization
+  if (message.visualization) {
+    console.log('[DEBUG] Message has visualization:', message.id, message.visualization.substring(0, 50) + '...')
+  }
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(message.content)

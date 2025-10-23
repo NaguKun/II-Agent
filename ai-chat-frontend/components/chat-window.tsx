@@ -129,7 +129,7 @@ export default function ChatWindow() {
     await sendMessageInternal(userMessage.content, undefined, undefined)
   }
 
-  const sendMessageInternal = async (content: string, imageFile?: File, csvFile?: File) => {
+  const sendMessageInternal = async (content: string, imageFile?: File, csvFile?: File, csvUrl?: string) => {
     setIsLoading(true)
 
     try {
@@ -149,9 +149,9 @@ export default function ChatWindow() {
         }
 
         setMessages((prev) => [...prev, assistantMessage])
-      } else if (csvFile) {
-        // Handle CSV upload
-        const response = await apiService.sendCsvMessage(sessionId, content, csvFile)
+      } else if (csvFile || csvUrl) {
+        // Handle CSV upload or URL
+        const response = await apiService.sendCsvMessage(sessionId, content, csvFile, csvUrl)
 
         const assistantMessage: Message = {
           id: response.message_id,
@@ -195,6 +195,7 @@ export default function ChatWindow() {
           },
           // On complete
           (messageId: string, visualization?: string) => {
+            console.log('[DEBUG] Stream complete callback. Visualization:', visualization ? `Present (${visualization.length} chars)` : 'None');
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === streamingMessageId
@@ -235,7 +236,7 @@ export default function ChatWindow() {
     }
   }
 
-  const handleSendMessage = async (content: string, imageFile?: File, csvFile?: File) => {
+  const handleSendMessage = async (content: string, imageFile?: File, csvFile?: File, csvUrl?: string) => {
     if (!content.trim()) return
 
     // Add user message with file preview
@@ -245,12 +246,12 @@ export default function ChatWindow() {
       content,
       timestamp: new Date(),
       image: imageFile ? URL.createObjectURL(imageFile) : undefined,
-      csvData: csvFile ? `📄 ${csvFile.name}` : undefined,
+      csvData: csvFile ? `📄 ${csvFile.name}` : csvUrl ? `🔗 ${csvUrl}` : undefined,
     }
 
     setMessages((prev) => [...prev, userMessage])
 
-    await sendMessageInternal(content, imageFile, csvFile)
+    await sendMessageInternal(content, imageFile, csvFile, csvUrl)
   }
 
   const handleExportConversation = async (format: 'json' | 'markdown' | 'text') => {
